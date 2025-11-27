@@ -1,1 +1,299 @@
-<!DOCTYPE html><html><body><h2>CobroApp</h2></body></html>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CobroApp</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2563eb">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+
+    <style>
+        /* CSS INTEGRADO */
+        :root { --primary: #2563eb; --bg: #f3f4f6; --card: #ffffff; --text: #1f2937; --border: #e5e7eb; }
+        @media (prefers-color-scheme: dark) { :root { --primary: #60a5fa; --bg: #111827; --card: #1f2937; --text: #f9fafb; --border: #374151; } }
+        body { font-family: -apple-system, system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding-bottom: 60px; }
+        .container { max-width: 800px; margin: 0 auto; padding: 16px; }
+        .card { background: var(--card); border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .btn { background: var(--primary); color: white; border: none; padding: 12px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; width: 100%; margin-top: 10px; }
+        .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
+        input, select { width: 100%; padding: 12px; margin: 8px 0; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); box-sizing: border-box; }
+        .nav-tabs { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 10px; }
+        .tab { padding: 8px 16px; background: var(--card); border-radius: 20px; white-space: nowrap; cursor: pointer; border: 1px solid var(--border); }
+        .tab.active { background: var(--primary); color: white; border-color: var(--primary); }
+        .hidden { display: none; }
+        .app-footer { text-align: center; font-size: 0.8rem; color: #6b7280; padding: 20px; margin-top: auto; }
+        .table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; min-width: 600px; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid var(--border); }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2 style="color: var(--primary);">CobroApp</h2>
+    
+    <div class="nav-tabs">
+        <div class="tab active" onclick="showSection('factura', this)">Nueva Cuenta</div>
+        <div class="tab" onclick="showSection('clientes', this)">Clientes</div>
+        <div class="tab" onclick="showSection('historial', this)">Historial</div>
+    </div>
+
+    <div id="factura" class="section">
+        <div class="card">
+            <h3>1. Emisor</h3>
+            <select id="userSelect"></select>
+        </div>
+        <div class="card">
+            <h3>2. Cliente</h3>
+            <select id="clientSelect" onchange="fillClientData()"></select>
+            <input type="text" id="clientAddress" placeholder="Dirección">
+            <input type="text" id="clientCity" placeholder="Ciudad">
+            <input type="text" id="clientPhone" placeholder="Teléfono">
+            <input type="hidden" id="clientNit">
+        </div>
+        <div class="card">
+            <h3>3. Conceptos</h3>
+            <div id="itemsContainer"></div>
+            <button class="btn btn-secondary" onclick="addItemRow()">+ Agregar Ítem</button>
+            <div style="text-align: right; margin-top: 15px; font-weight: bold; font-size: 1.2em;">TOTAL: $<span id="totalDisplay">0</span></div>
+        </div>
+        <div class="card">
+            <h3>4. Adjuntos</h3>
+            <input type="text" id="linkRut" placeholder="Link RUT">
+            <input type="text" id="linkBank" placeholder="Link Cert. Bancaria">
+        </div>
+        <button class="btn" onclick="generarPDF()">📄 Generar PDF</button>
+    </div>
+
+    <div id="clientes" class="section hidden">
+        <div class="card">
+            <h3>Directorio de Clientes</h3>
+            <div class="table-wrap"><table id="clientsTable"><thead><tr><th>Nombre</th><th>NIT</th></tr></thead><tbody></tbody></table></div>
+        </div>
+    </div>
+
+    <div id="historial" class="section hidden">
+        <div class="card">
+            <h3>Historial de Cobros</h3>
+            <div id="historyList">Cargando...</div>
+        </div>
+    </div>
+
+    <div class="app-footer">
+        Creado por John J. Arteaga Versión 2025-1 Email jjarteagap@gmail.com<br>Desarrollado por Gemini AI
+    </div>
+</div>
+
+<script>
+    // --- DATOS INICIALES (Extraídos de tus CSVs) ---
+    const SEED_USUARIOS = [
+        {nombre: "JOHN J. ARTEAGA P", prefijo: "JJ", consecutivo: 1182, docto: "71663501", ciudad: "MEDELLIN", dir: "CR 84 B 7-95", email: "jjarteagap@gmail.com", tel: "310 412 0210", banco: "Bancolombia", cuenta: "00566350106"},
+        {nombre: "DIANA T. HERNANDEZ F", prefijo: "DT", consecutivo: 31, docto: "43524638", ciudad: "MEDELLIN", dir: "CR 84 B 7-95", email: "diana.hernadezf@gmail.com", tel: "321 811 5576", banco: "Bancolombia", cuenta: "10150328893"},
+        {nombre: "CARLOS A. ARTEAGA P", prefijo: "CA", consecutivo: 4, docto: "71699207", ciudad: "MEDELLIN", dir: "CR 84 32-72", email: "caliche2668@gmail.com", tel: "323 466 2510", banco: "Bancolombia", cuenta: "00566350106"}
+    ];
+    // Muestra de Clientes (Se cargarán todos si agregas el resto del CSV aquí)
+    const SEED_CLIENTES = [
+        {cliente: "ACTIVOS OPERATIVOS SAS", nit: "900 526 675", ciudad: "MEDELLIN", dir: "CL 3 SUR 43 A 52 OF 1508"},
+        {cliente: "AGROGANADERA MONTENEGRO SA", nit: "890 917 521", ciudad: "MEDELLIN", dir: "CR 52 67 A 91"},
+        {cliente: "FLIT SAS", nit: "901 698 038", ciudad: "MEDELLIN", dir: "CL 3 SUR 41 65 OF 401"}
+    ];
+
+    let db = null;
+
+    // --- INICIO DE APP Y SQLITE ---
+    window.onload = async function() {
+        if('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js');
+        
+        const SQL = await initSqlJs({ locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}` });
+        db = new SQL.Database();
+        
+        // Crear Tablas
+        db.run("CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY, nombre TEXT, prefijo TEXT, consecutivo INTEGER, docto TEXT, ciudad TEXT, dir TEXT, email TEXT, tel TEXT, banco TEXT, cuenta TEXT);");
+        db.run("CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY, nombre TEXT, nit TEXT, ciudad TEXT, dir TEXT, email TEXT);");
+        db.run("CREATE TABLE IF NOT EXISTS historial (id INTEGER PRIMARY KEY, fecha TEXT, cliente TEXT, total TEXT);");
+
+        // Poblar si está vacía
+        if(db.exec("SELECT count(*) FROM usuarios")[0].values[0][0] === 0) {
+            SEED_USUARIOS.forEach(u => db.run("INSERT INTO usuarios VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [u.nombre, u.prefijo, u.consecutivo, u.docto, u.ciudad, u.dir, u.email, u.tel, u.banco, u.cuenta]));
+            SEED_CLIENTES.forEach(c => db.run("INSERT INTO clientes VALUES (NULL, ?, ?, ?, ?, ?)", [c.cliente, c.nit, c.ciudad, c.dir, ""]));
+        }
+        
+        loadUI();
+        addItemRow(); // Fila inicial
+    };
+
+    function loadUI() {
+        // Cargar Usuarios
+        const uSelect = document.getElementById('userSelect');
+        const users = db.exec("SELECT * FROM usuarios")[0].values;
+        users.forEach((u, i) => {
+            let opt = new Option(u[1], i); // Guardamos index en value
+            if(u[1].includes("JOHN")) opt.selected = true;
+            uSelect.add(opt);
+        });
+
+        // Cargar Clientes
+        const cSelect = document.getElementById('clientSelect');
+        const clientesRes = db.exec("SELECT * FROM clientes");
+        if(clientesRes.length) {
+            cSelect.add(new Option("Seleccione Cliente...", ""));
+            clientesRes[0].values.forEach(c => {
+                cSelect.add(new Option(c[1], JSON.stringify(c))); // Todo el objeto en value
+                // Poblar tabla clientes
+                document.querySelector('#clientsTable tbody').insertAdjacentHTML('beforeend', `<tr><td>${c[1]}</td><td>${c[2]}</td></tr>`);
+            });
+        }
+    }
+
+    // --- INTERFAZ ---
+    function showSection(id, tab) {
+        document.querySelectorAll('.section').forEach(s => s.classList.add('hidden'));
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.getElementById(id).classList.remove('hidden');
+        if(tab) tab.classList.add('active');
+        if(id === 'historial') loadHistory();
+    }
+
+    function fillClientData() {
+        const val = document.getElementById('clientSelect').value;
+        if(!val) return;
+        const c = JSON.parse(val);
+        document.getElementById('clientAddress').value = c[4];
+        document.getElementById('clientCity').value = c[3];
+        document.getElementById('clientNit').value = c[2];
+    }
+
+    function addItemRow() {
+        const div = document.createElement('div');
+        div.style.cssText = 'display:flex; gap:5px; margin-bottom:5px;';
+        div.innerHTML = `
+            <input type="number" placeholder="Cant" style="width:60px" oninput="calcTotal()">
+            <input type="text" placeholder="Descripción" style="flex:1" onkeyup="this.value=this.value.toUpperCase()">
+            <input type="number" placeholder="Vr. Unit" style="width:100px" oninput="calcTotal()">
+            <input type="text" readonly placeholder="Total" style="width:100px; background:#eee">
+        `;
+        document.getElementById('itemsContainer').appendChild(div);
+    }
+
+    function calcTotal() {
+        let total = 0;
+        document.getElementById('itemsContainer').childNodes.forEach(row => {
+            const inps = row.querySelectorAll('input');
+            if(inps.length) {
+                const sub = (parseFloat(inps[0].value)||0) * (parseFloat(inps[2].value)||0);
+                inps[3].value = sub.toLocaleString('es-CO');
+                total += sub;
+            }
+        });
+        document.getElementById('totalDisplay').innerText = total.toLocaleString('es-CO');
+    }
+
+    function loadHistory() {
+        const list = document.getElementById('historyList');
+        const res = db.exec("SELECT * FROM historial ORDER BY id DESC");
+        list.innerHTML = res.length ? res[0].values.map(r => 
+            `<div style="padding:10px; border-bottom:1px solid #eee; display:flex; justify-content:space-between;">
+                <span>${r[1]} - <b>${r[2]}</b></span><span>$${parseFloat(r[3]).toLocaleString('es-CO')}</span>
+             </div>`
+        ).join('') : '<p>Sin registros.</p>';
+    }
+
+    // --- GENERADOR PDF PROFESIONAL ---
+    async function generarPDF() {
+        const { PDFDocument, StandardFonts, rgb, grayscale } = PDFLib;
+        const doc = await PDFDocument.create();
+        const page = doc.addPage();
+        const { width, height } = page.getSize();
+        const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+        const fontReg = await doc.embedFont(StandardFonts.Helvetica);
+
+        // Datos
+        const userIdx = document.getElementById('userSelect').value;
+        const userData = db.exec("SELECT * FROM usuarios")[0].values[userIdx];
+        const clientSel = document.getElementById('clientSelect');
+        const clientName = clientSel.options[clientSel.selectedIndex].text;
+        const clientNit = document.getElementById('clientNit').value;
+        const fecha = new Date().toLocaleDateString('es-CO', {year:'numeric', month:'long', day:'numeric'});
+
+        // Helpers Dibujo
+        const txt = (text, x, y, size=10, font=fontReg, color=rgb(0,0,0)) => page.drawText(String(text), {x,y,size,font,color});
+        let y = height - 50;
+
+        // Header
+        txt('CUENTA DE COBRO', 50, y, 18, fontBold, rgb(0, 0.2, 0.6));
+        txt(`Nro. ${userData[2]} - ${userData[3]}`, width-150, y, 14, fontBold, rgb(0.8,0,0));
+        y -= 25;
+        txt(`Fecha: ${fecha}`, 50, y);
+        y -= 30; page.drawLine({start:{x:50,y:y+15}, end:{x:width-50,y:y+15}, thickness:1});
+
+        // Datos Partes
+        const yBase = y;
+        txt('DEUDOR (CLIENTE):', 50, y, 9, fontBold, grayscale(0.5));
+        y -= 15; txt(clientName, 50, y, 11, fontBold);
+        y -= 12; txt(`NIT: ${clientNit}`, 50, y);
+        y -= 12; txt(document.getElementById('clientAddress').value, 50, y);
+        
+        y = yBase; // Reset Y para col derecha
+        txt('BENEFICIARIO:', 320, y, 9, fontBold, grayscale(0.5));
+        y -= 15; txt(userData[1], 320, y, 11, fontBold);
+        y -= 12; txt(`CC: ${userData[4]}`, 320, y);
+        y -= 12; txt(`Tel: ${userData[8]}`, 320, y);
+        y -= 12; txt(userData[9], 320, y, 9, fontReg, rgb(0.4,0.4,0.4));
+
+        y -= 40; 
+        
+        // Tabla
+        page.drawRectangle({x:50, y:y-5, width:width-100, height:20, color:rgb(0.95,0.95,0.95)});
+        txt('CANT', 60, y, 9, fontBold); txt('DESCRIPCIÓN', 110, y, 9, fontBold); txt('TOTAL', 500, y, 9, fontBold);
+        y -= 20;
+
+        let totalDoc = 0;
+        document.getElementById('itemsContainer').childNodes.forEach(row => {
+            const inp = row.querySelectorAll('input');
+            if(inp[1].value) {
+                const total = (parseFloat(inp[0].value)||0) * (parseFloat(inp[2].value)||0);
+                totalDoc += total;
+                txt(inp[0].value, 60, y);
+                txt(inp[1].value.substring(0,60), 110, y);
+                txt(`$ ${total.toLocaleString('es-CO')}`, 500, y);
+                page.drawLine({start:{x:50,y:y-4}, end:{x:width-50,y:y-4}, thickness:0.5, color:grayscale(0.8)});
+                y -= 20;
+            }
+        });
+
+        // Total
+        y -= 20;
+        page.drawRectangle({x:400, y:y-30, width:150, height:35, color:rgb(0.9,0.95,1)});
+        txt('TOTAL A PAGAR:', 410, y-10, 10, fontBold);
+        txt(`$ ${totalDoc.toLocaleString('es-CO')}`, 410, y-25, 12, fontBold);
+
+        // Banco
+        txt('CONSIGNAR EN:', 50, y-10, 9, fontBold, grayscale(0.5));
+        txt(`${userData[10]} - ${userData[11]}`, 50, y-25, 10, fontBold);
+        txt(`Nro: ${userData[12]}`, 50, y-40, 10);
+
+        // Adjuntos
+        y -= 80;
+        txt('LINKS ADJUNTOS:', 50, y, 8, fontBold);
+        y -= 15;
+        if(document.getElementById('linkRut').value) { txt('• Link RUT (Clic para descargar)', 50, y, 9, fontReg, rgb(0,0,1)); y-=12; }
+        if(document.getElementById('linkBank').value) { txt('• Link Certificación Bancaria', 50, y, 9, fontReg, rgb(0,0,1)); }
+
+        // Guardar Historial
+        db.run("INSERT INTO historial VALUES (NULL, ?, ?, ?)", [fecha, clientName, totalDoc]);
+        loadHistory();
+
+        // Descargar
+        const pdfBytes = await doc.save();
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(new Blob([pdfBytes], {type: 'application/pdf'}));
+        link.download = `Cobro_${clientName}.pdf`;
+        link.click();
+    }
+</script>
+</body>
+</html>
